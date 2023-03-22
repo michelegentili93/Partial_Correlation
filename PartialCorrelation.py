@@ -292,94 +292,17 @@ class PartialCorrelation:
 
     
 def fast_ridge_residuals(X,y,lambda_i_top_k):
-
+    # faster regression residuals
     beta = np.linalg.inv(np.dot(X.T,X)+np.diag(lambda_i_top_k))
     beta = np.dot(np.dot(beta,X.T),y)
     res_i_check = y-np.dot(X,beta)
     return res_i_check
 
-def update_core_regression(x_inv,columns_ij):
-    x_inv_sub = get_sub_matrix_inv(x_inv,columns_ij)
-    x_inv_sub = update_lambda_diag_inv(x_inv_sub,lambda_ij)
-    return x_inv_sub 
-
-def get_sub_matrix_inv(x_inv,columns_ij):
-    sub_inv = x_inv.copy()
-    columns_ij = sorted(columns_ij)
-    i=0
-    for column in columns_ij:
-        #when deleting the second column you have to scale down the index of 1
-        column -=i
-        i+=1
-        sub_inv = matrix_inverse_reduced_one_column(sub_inv,column)
-    return sub_inv
-
-def matrix_inverse_reduced_one_column(x_inv,column):
-    '''
-    https://math.stackexchange.com/questions/208001/are-there-any-decompositions-of-a-symmetric-matrix-that-allow-for-the-inversion/208021#208021
-
-    xtx_inv = is already computed np.linalg.inv(np.dot(x.T,x))
-
-    y = x without i,j
-    l = columns_ij of x
-
-    xtx_inv = (xtx)^-1 = (yty ytl)^-1 = (E  f) 
-                         (lty ltl)      (gt h)     
-
-    inv(yty) =  E-f*(1/h)gt
-    '''
-    not_column = [t for t in range(x_inv.shape[0]) if t !=column]
-    E = x_inv[not_column][:,not_column]
-    f = x_inv[not_column,column].reshape(-1,1)
-    gt = x_inv[column,not_column].reshape(1,-1)
-    h = x_inv[column,column]
-    inv_yty = E -  np.dot(f*1/h,gt)
-    return inv_yty
-
-
-def update_single_diag_inv(x_inv,entry,l):
-    c = x_inv[:,[entry]]
-    return x_inv - l*np.dot(c,c.T)/(1+l*x_inv[entry,entry])
-
-def update_lambda_diag_inv(x_inv,lambda_ij):
-    res_inv = x_inv.copy()
-    for entry,l in enumerate(lambda_ij):
-        res_inv = update_single_diag_inv(res_inv,entry,l)
-    return res_inv 
-
 
 def top_k(x,k):
+    # extract top k values and index from x pandas DataFrame
     values = x.values
     genes = x.index
     index = values.argpartition(k)
     final_index = values[index[:k]].argsort() 
     return genes[index[final_index]],values[index[final_index]]
-
-
-def corr2_coeff(A, B):
-    # Rowwise mean of input arrays & subtract from input arrays themeselves
-
-    A_mA = A - A.mean(0)
-    B_mB = B - B.mean(1)[:, None]
-
-    # Sum of squares across rows
-    ssA = (A_mA ** 2).sum(0, keepdims=True);
-    ssB = (B_mB ** 2).sum(1);
-    a = np.dot(A_mA, B_mB.T)
-    # Finally get corr coeff
-    return np.dot(A_mA, B_mB.T) / np.sqrt(np.dot(ssA[:, None], ssB[None]))
-
-
-def corr2_coeff_m(A, B = None):
-    # Rowwise mean of input arrays & subtract from input arrays themeselves
-    A_mA = A - A.mean(1)[:, None]
-    # Sum of squares across rows
-    ssA = (A_mA ** 2).sum(1);
-    if B is not None:
-        B_mB = B - B.mean(1)[:, None]
-        ssB = (B_mB ** 2).sum(1);
-        a = np.dot(A_mA, B_mB.T)/ np.sqrt(np.dot(ssA.reshape(-1,1), ssB.reshape(1,-1)))
-    else:
-        a = np.dot(A_mA, A_mA.T)/ np.sqrt(np.dot(ssA.reshape(-1,1), ssA.reshape(1,-1)))
-
-    return a
