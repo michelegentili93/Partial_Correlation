@@ -2,6 +2,9 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.ticker import MultipleLocator
+
 
 def read_data(dict_params,dir_pcorr_output):
     '''
@@ -46,8 +49,6 @@ def read_data(dict_params,dir_pcorr_output):
     
     return df_melt_pcor,array_pcors,list_params
 
-import seaborn as sns
-from matplotlib.ticker import MultipleLocator
 
 def plot_edges_distr(df_melt_pcor,list_pop,set_target_genes,ch='4'):
     plt.figure(figsize=[25,10*len(list_pop)])

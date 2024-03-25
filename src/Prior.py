@@ -15,7 +15,7 @@ import ray,psutil
     
 class PPI_prior():
 
-    def __init__(self, nt_ppi, path_prior_file_output,verbose=True,parallel = False,recompute=False):
+    def __init__(self, nt_ppi, path_prior_file,verbose=True,parallel = False,recompute=False):
         """
         threshold_ppi_edge: how to filter PPI interaction, if STRING (default)
         path_ppi_dir = name file with the PPI network
@@ -29,25 +29,31 @@ class PPI_prior():
         self.parallel = parallel
 
         
-        if verbose: print('path name prior: ',path_prior_file_output)
+        if verbose: print('path name prior: ',path_prior_file)
         # If already computed
-        
-        if os.path.exists(path_prior_file_output) and not recompute:
+        if os.path.exists(path_prior_file) and not recompute:
             if verbose: print('Loading Prior')
-            self.df_prior = pd.read_csv(path_prior_file_output,index_col=0)#, engine="pyarrow")
+            self.df_prior = pd.read_csv(path_prior_file,index_col=0)#, engine="pyarrow")
 
         else:
             self.df_prior = self._compute_matrix_prior(network=nt_ppi)
-            self.df_prior = 1/pd.DataFrame.from_dict(self.df_prior,orient='index')
-            self.df_prior.to_csv(path_prior_file_output)
+            self.df_prior.to_csv(path_prior_file)
         
 
     def to_iterator(self,obj_ids):
         while obj_ids:
             done, obj_ids = ray.wait(obj_ids)
             yield ray.get(done[0])
-            
+
     def _compute_matrix_prior(self, network):
+        df_prior = self._compute_all_pagerank(network=network)
+        df_prior = 1/pd.DataFrame.from_dict(df_prior,orient='index')
+        list_genes = sorted(df_prior.index)
+        df_prior = df_prior.loc[list_genes,list_genes]
+
+        return df_prior
+  
+    def _compute_all_pagerank(self, network):
         """
 
         Create the matrix prior
@@ -60,31 +66,36 @@ class PPI_prior():
         
         n_genes = network.number_of_nodes()
         matrix_prior = {}
-        M = nx.to_scipy_sparse_matrix(network)
+        M = nx.to_scipy_sparse_array(network)
         nodelist = network.nodes()
-        
+
         S = np.array(M.sum(axis=1), dtype=int).flatten()
         S = np.divide(1, S, out=np.zeros(n_genes), where= S!=0)
         is_dangling = np.where(S == 0)[0]
         Q = scipy.sparse.spdiags(S.T, 0, *M.shape, format='csr')
-        M = Q * M
+        M = Q.dot(M)
         M = M.transpose()
         if self.parallel:
+            import ray,psutil
             if not ray.is_initialized():
                 ### Ray Initialisation
                 num_cpus = psutil.cpu_count(logical=False) - 1
                 print('Using ',num_cpus,'cpus')
-                ray.init(log_to_driver=False, num_cpus=num_cpus)
-                @ray.remote
-                def _pers_pagerank_ray(gene_i, M, nodelist,is_dangling):
-                    return gene_i, _pers_pagerank(gene_i, M, nodelist,is_dangling)
-
+                ray.init(log_to_driver=True, num_cpus=num_cpus)
+            def to_iterator(obj_ids):
+                while obj_ids:
+                    done, obj_ids = ray.wait(obj_ids)
+                    yield ray.get(done[0])
+            @ray.remote
+            def _pers_pagerank_ray( gene_i, M, nodelist,is_dangling):
+                return gene_i, _pers_pagerank(gene_i, M, nodelist,is_dangling)
+            
             id_M = ray.put(M)
             id_nodelist = ray.put(nodelist)
             id_is_dangling = ray.put(is_dangling)
-            id_res = [self._pers_pagerank_ray.remote(gene_i, M = id_M, nodelist = id_nodelist, 
+            id_res = [_pers_pagerank_ray.remote(gene_i, M = id_M, nodelist = id_nodelist, 
                                                 is_dangling = id_is_dangling) for gene_i in nodelist ]
-            for gene_i, result in tqdm(self.to_iterator(id_res), total=len(id_res)):
+            for gene_i, result in tqdm(to_iterator(id_res), total=len(id_res)):
                 matrix_prior[gene_i] = result
 
         else:
@@ -94,14 +105,15 @@ class PPI_prior():
         
         return matrix_prior
     
-    
 def _pers_pagerank(gene,M, nodelist, is_dangling, alpha=0.85, max_iter=100, tol=1.0e-6, dangling=None):
     '''
         Compute personalige page rank wrt to input gene in input network.
         gene: id of the node coherent with the network
         network: nx network
     '''
-    # gene,network=x
+    if gene not in nodelist:
+        raise nx.exception.NetworkXError('gene not in nodelist ')
+    
     personalization = {node: 0 for node in nodelist} #0.25/len(network)
     personalization[gene] = 1
     
@@ -141,13 +153,13 @@ def _pers_pagerank(gene,M, nodelist, is_dangling, alpha=0.85, max_iter=100, tol=
     # power iteration: make up to max_iter iterations
     for _ in range(max_iter):
         xlast = x
-        x = alpha * (M*x + sum(x[is_dangling]) * dangling_weights) + (1 - alpha) * p
+        x = alpha * (M.dot(x) + sum(x[is_dangling]) * dangling_weights) + (1 - alpha) * p
         # check convergence, l1 norm
         err = np.abs(x - xlast).sum()
         if err < N * tol:
+            
             return dict(zip(nodelist, map(float, x))) # ,x,M)
     raise nx.exception.NetworkXError('power iteration failed to converge in %d iterations. Node: ' % max_iter + ' '.join(current_node))
-
 
 
         
