@@ -21,6 +21,7 @@ In this repo we share the code associated to the algorithm (Gene-Specific Ridge 
 
 ./Paper Analysis Notebook/ : 3 Notebook to generate the paper figures from the PCORR output in ./Data/GSE/, ./Data/LTRC/ and ./Data/Review_response/.
 
+./Gwas_hits/ Folder containing notebook and data to reproduce the simulation on the clustering probability of the COPD GWAS loci. 
 
 
 
